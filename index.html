@@ -1,0 +1,846 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Markdown to EPUB Converter</title>
+    <!-- Tailwind CSS cho styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- JSZip để tạo file zip (định dạng epub dựa trên zip) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    
+    <!-- Marked để parse Markdown sang HTML -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <!-- Thư viện KaTeX core -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js"></script>
+    <!-- Extension KaTeX cho Marked -->
+    <script src="https://cdn.jsdelivr.net/npm/marked-katex-extension/lib/index.umd.js"></script>
+
+    <!-- SortableJS để kéo thả thay đổi thứ tự file -->
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
+    <!-- Phosphor Icons -->
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+    <style>
+        /* Tùy chỉnh thanh cuộn cho đẹp hơn */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #f1f1f1;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #c1c1c1;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #a8a8a8;
+        }
+        
+        /* Hiệu ứng kéo thả cho SortableJS */
+        .sortable-ghost {
+            opacity: 0.4;
+            background-color: #f3f4f6; /* bg-gray-100 */
+        }
+        .sortable-chosen {
+            background-color: #e5e7eb; /* bg-gray-200 */
+        }
+        .sortable-drag {
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+        }
+        
+        /* Loading spinner */
+        .loader {
+            border: 3px solid #f3f3f3;
+            border-radius: 50%;
+            border-top: 3px solid #3b82f6;
+            width: 24px;
+            height: 24px;
+            -webkit-animation: spin 1s linear infinite; /* Safari */
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-800 font-sans min-h-screen flex flex-col">
+
+    <!-- Header -->
+    <header class="bg-white shadow-sm sticky top-0 z-10">
+        <div class="max-w-5xl mx-auto px-4 py-4 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center text-white shadow-md">
+                    <i class="ph ph-book-open-text text-2xl"></i>
+                </div>
+                <h1 class="text-xl font-bold text-gray-900 tracking-tight">MD to EPUB Pro</h1>
+            </div>
+            <div class="text-sm text-gray-500 font-medium">
+                Công cụ chuyển đổi chuyên nghiệp
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="flex-grow max-w-5xl mx-auto w-full px-4 py-8 grid grid-cols-1 lg:grid-cols-12 gap-8">
+        
+        <!-- Cột bên trái: Cài đặt và Upload -->
+        <div class="lg:col-span-5 flex flex-col gap-6">
+            
+            <!-- Metadata Card -->
+            <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-5">
+                <h2 class="text-lg font-semibold mb-4 flex items-center gap-2">
+                    <i class="ph ph-info text-blue-500"></i> Thông tin sách
+                </h2>
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Tên sách</label>
+                        <input type="text" id="bookTitle" placeholder="Ví dụ: Sổ tay lập trình..." 
+                            class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Tác giả</label>
+                        <input type="text" id="bookAuthor" placeholder="Tên tác giả" 
+                            class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Bìa sách (URL hình ảnh - Tùy chọn)</label>
+                        <input type="url" id="bookCover" placeholder="https://example.com/cover.jpg" 
+                            class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all text-sm">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Upload Zone -->
+            <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-5">
+                <h2 class="text-lg font-semibold mb-4 flex items-center gap-2">
+                    <i class="ph ph-file-md text-blue-500"></i> Tải lên files
+                </h2>
+                
+                <div id="dropZone" class="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center hover:border-blue-500 hover:bg-blue-50 transition-all cursor-pointer group relative">
+                    <input type="file" id="fileInput" multiple accept=".md,.markdown" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10">
+                    <div class="flex flex-col items-center gap-3">
+                        <div class="w-12 h-12 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 group-hover:scale-110 transition-transform">
+                            <i class="ph ph-upload-simple text-2xl"></i>
+                        </div>
+                        <div>
+                            <p class="font-medium text-gray-700">Kéo thả file Markdown vào đây</p>
+                            <p class="text-sm text-gray-500 mt-1">hoặc click để chọn nhiều file</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <button id="addEmptyFileBtn" class="mt-4 w-full py-2 px-4 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 flex items-center justify-center gap-2 transition-colors text-sm font-medium">
+                    <i class="ph ph-plus"></i> Thêm chương trống
+                </button>
+            </div>
+
+            <!-- Actions -->
+            <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-5 sticky top-24">
+                <button id="generateBtn" disabled class="w-full py-3 px-4 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white rounded-lg font-semibold shadow-md transition-all flex items-center justify-center gap-2">
+                    <i class="ph ph-export text-lg"></i>
+                    <span>Tạo sách EPUB</span>
+                </button>
+                <div id="statusMessage" class="mt-3 text-center text-sm font-medium hidden">
+                    <!-- Status text will appear here -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Cột bên phải: Quản lý danh sách file -->
+        <div class="lg:col-span-7 flex flex-col">
+            <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-0 flex-grow flex flex-col overflow-hidden h-[600px]">
+                <!-- List Header -->
+                <div class="p-4 border-b border-gray-200 bg-gray-50 flex justify-between items-center z-10">
+                    <h2 class="text-lg font-semibold flex items-center gap-2">
+                        <i class="ph ph-list-numbers text-blue-500"></i> Mục lục sách
+                    </h2>
+                    <span id="fileCount" class="text-sm font-medium bg-blue-100 text-blue-800 py-1 px-2 rounded-full">0 file</span>
+                </div>
+                
+                <!-- List Body -->
+                <div class="p-2 overflow-y-auto flex-grow bg-gray-50/50 relative">
+                    <!-- Empty State -->
+                    <div id="emptyState" class="absolute inset-0 flex flex-col items-center justify-center text-gray-400 p-6 text-center">
+                        <i class="ph ph-empty text-6xl mb-4 opacity-20"></i>
+                        <p class="font-medium text-gray-600 mb-1">Chưa có file nào</p>
+                        <p class="text-sm">Hãy tải lên các file Markdown để bắt đầu tạo sách. Bạn có thể kéo thả để sắp xếp lại thứ tự chương.</p>
+                    </div>
+
+                    <!-- Danh sách file kéo thả -->
+                    <ul id="fileList" class="space-y-2 relative z-10 min-h-[100px]">
+                        <!-- Các item sẽ được render bằng JS -->
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Modal Chỉnh sửa Tên Chương -->
+    <div id="editModal" class="fixed inset-0 bg-black/50 hidden items-center justify-center z-50 backdrop-blur-sm">
+        <div class="bg-white rounded-xl shadow-xl w-full max-w-md mx-4 transform transition-all scale-95 opacity-0" id="editModalContent">
+            <div class="p-5 border-b border-gray-200 flex justify-between items-center">
+                <h3 class="text-lg font-semibold">Chỉnh sửa tên chương</h3>
+                <button id="closeModalBtn" class="text-gray-400 hover:text-gray-600 transition-colors">
+                    <i class="ph ph-x text-xl"></i>
+                </button>
+            </div>
+            <div class="p-5">
+                <label class="block text-sm font-medium text-gray-700 mb-1">Tên chương (hiển thị trong Mục lục)</label>
+                <input type="text" id="editChapterName" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none mb-4">
+                
+                <label class="block text-sm font-medium text-gray-700 mb-1">Tên file gốc</label>
+                <input type="text" id="editFileName" disabled class="w-full px-3 py-2 bg-gray-100 border border-gray-300 rounded-lg text-gray-500 text-sm">
+            </div>
+            <div class="p-4 border-t border-gray-200 flex justify-end gap-3 bg-gray-50 rounded-b-xl">
+                <button id="cancelEditBtn" class="px-4 py-2 text-gray-700 font-medium hover:bg-gray-200 rounded-lg transition-colors">Hủy</button>
+                <button id="saveEditBtn" class="px-4 py-2 bg-blue-600 text-white font-medium hover:bg-blue-700 rounded-lg shadow-sm transition-colors">Lưu thay đổi</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="border-t border-gray-200 bg-white py-6 mt-auto">
+        <div class="max-w-5xl mx-auto px-4 text-center text-gray-500 text-sm">
+            Tạo sách EPUB nhanh chóng từ Markdown. Mọi xử lý diễn ra trên trình duyệt của bạn, đảm bảo riêng tư.
+        </div>
+    </footer>
+
+    <script>
+        // --- State Management ---
+        const state = {
+            files: [], // Array of objects: { id, filename, title, content, originalFile }
+            nextId: 1,
+            editingId: null
+        };
+
+        // --- DOM Elements ---
+        const els = {
+            dropZone: document.getElementById('dropZone'),
+            fileInput: document.getElementById('fileInput'),
+            fileList: document.getElementById('fileList'),
+            fileCount: document.getElementById('fileCount'),
+            emptyState: document.getElementById('emptyState'),
+            generateBtn: document.getElementById('generateBtn'),
+            bookTitle: document.getElementById('bookTitle'),
+            bookAuthor: document.getElementById('bookAuthor'),
+            bookCover: document.getElementById('bookCover'),
+            addEmptyFileBtn: document.getElementById('addEmptyFileBtn'),
+            
+            // Modal
+            editModal: document.getElementById('editModal'),
+            editModalContent: document.getElementById('editModalContent'),
+            editChapterName: document.getElementById('editChapterName'),
+            editFileName: document.getElementById('editFileName'),
+            closeModalBtn: document.getElementById('closeModalBtn'),
+            cancelEditBtn: document.getElementById('cancelEditBtn'),
+            saveEditBtn: document.getElementById('saveEditBtn'),
+            
+            statusMessage: document.getElementById('statusMessage')
+        };
+
+        // --- Initialize SortableJS ---
+        // Cho phép kéo thả danh sách file
+        const sortable = new Sortable(els.fileList, {
+            animation: 150,
+            ghostClass: 'sortable-ghost',
+            chosenClass: 'sortable-chosen',
+            dragClass: 'sortable-drag',
+            handle: '.drag-handle', // Chỉ cho phép kéo ở biểu tượng handle
+            onEnd: function (evt) {
+                // Cập nhật lại mảng state.files theo thứ tự DOM mới
+                const newOrderIds = Array.from(els.fileList.children).map(li => parseInt(li.dataset.id));
+                const newFiles = [];
+                newOrderIds.forEach(id => {
+                    const file = state.files.find(f => f.id === id);
+                    if (file) newFiles.push(file);
+                });
+                state.files = newFiles;
+                updateNumbering(); // Cập nhật lại số thứ tự hiển thị
+            }
+        });
+
+        // --- File Handling Functions ---
+
+        // Đọc nội dung file
+        const readFileContent = (file) => {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = (e) => resolve(e.target.result);
+                reader.onerror = (e) => reject(e);
+                reader.readAsText(file);
+            });
+        };
+
+        // Xử lý khi files được chọn (qua input hoặc drop)
+        const handleFiles = async (fileList) => {
+            const mdFiles = Array.from(fileList).filter(f => f.name.toLowerCase().endsWith('.md') || f.name.toLowerCase().endsWith('.markdown'));
+            
+            if (mdFiles.length === 0) return;
+
+            // Hiển thị loading (tùy chọn, vì thường xử lý file txt khá nhanh)
+            for (const file of mdFiles) {
+                try {
+                    const content = await readFileContent(file);
+                    
+                    // Tạo title từ tên file (bỏ đuôi, thay _ - bằng space)
+                    let title = file.name.replace(/\.(md|markdown)$/i, '');
+                    title = title.replace(/[-_]/g, ' ');
+                    // Viết hoa chữ cái đầu tiên (tùy chọn)
+                    title = title.charAt(0).toUpperCase() + title.slice(1);
+
+                    state.files.push({
+                        id: state.nextId++,
+                        filename: file.name,
+                        title: title,
+                        content: content
+                    });
+                } catch (err) {
+                    console.error("Lỗi đọc file:", file.name, err);
+                    alert(`Không thể đọc file ${file.name}`);
+                }
+            }
+
+            renderFileList();
+            updateUIState();
+        };
+
+        // Thêm chương trống
+        els.addEmptyFileBtn.addEventListener('click', () => {
+            const num = state.files.length + 1;
+            state.files.push({
+                id: state.nextId++,
+                filename: `chapter-${num}.md`,
+                title: `Chương ${num}`,
+                content: `# Chương ${num}\n\nNội dung...`
+            });
+            renderFileList();
+            updateUIState();
+        });
+
+        // --- Event Listeners for File Input ---
+
+        els.fileInput.addEventListener('change', (e) => {
+            handleFiles(e.target.files);
+            // Reset input để có thể chọn lại cùng file
+            els.fileInput.value = '';
+        });
+
+        // Kéo thả files vào dropzone
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            els.dropZone.addEventListener(eventName, preventDefaults, false);
+        });
+
+        function preventDefaults(e) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+
+        ['dragenter', 'dragover'].forEach(eventName => {
+            els.dropZone.addEventListener(eventName, () => {
+                els.dropZone.classList.add('border-blue-500', 'bg-blue-50');
+            }, false);
+        });
+
+        ['dragleave', 'drop'].forEach(eventName => {
+            els.dropZone.addEventListener(eventName, () => {
+                els.dropZone.classList.remove('border-blue-500', 'bg-blue-50');
+            }, false);
+        });
+
+        els.dropZone.addEventListener('drop', (e) => {
+            const dt = e.dataTransfer;
+            const files = dt.files;
+            handleFiles(files);
+        }, false);
+
+        // --- UI Rendering Functions ---
+
+        // Xóa một file khỏi danh sách
+        const deleteFile = (id) => {
+            state.files = state.files.filter(f => f.id !== id);
+            renderFileList();
+            updateUIState();
+        };
+
+        // Mở modal edit
+        const openEditModal = (id) => {
+            const file = state.files.find(f => f.id === id);
+            if (!file) return;
+            
+            state.editingId = id;
+            els.editChapterName.value = file.title;
+            els.editFileName.value = file.filename;
+            
+            els.editModal.classList.remove('hidden');
+            els.editModal.classList.add('flex');
+            // Timeout nhỏ để CSS transition chạy
+            setTimeout(() => {
+                els.editModalContent.classList.remove('scale-95', 'opacity-0');
+                els.editModalContent.classList.add('scale-100', 'opacity-100');
+                els.editChapterName.focus();
+            }, 10);
+        };
+
+        // Đóng modal edit
+        const closeEditModal = () => {
+            els.editModalContent.classList.remove('scale-100', 'opacity-100');
+            els.editModalContent.classList.add('scale-95', 'opacity-0');
+            
+            setTimeout(() => {
+                els.editModal.classList.add('hidden');
+                els.editModal.classList.remove('flex');
+                state.editingId = null;
+            }, 200); // Khớp với transition duration
+        };
+
+        // Lưu thay đổi từ modal
+        const saveEdit = () => {
+            if (state.editingId !== null) {
+                const newTitle = els.editChapterName.value.trim();
+                if (newTitle) {
+                    const fileIndex = state.files.findIndex(f => f.id === state.editingId);
+                    if (fileIndex !== -1) {
+                        state.files[fileIndex].title = newTitle;
+                        renderFileList(); // Cập nhật lại UI
+                    }
+                }
+            }
+            closeEditModal();
+        };
+
+        // Render toàn bộ danh sách
+        const renderFileList = () => {
+            els.fileList.innerHTML = '';
+            
+            state.files.forEach((file, index) => {
+                const li = document.createElement('li');
+                li.className = "bg-white border border-gray-200 rounded-lg p-3 flex items-center gap-3 shadow-sm group hover:border-blue-300 transition-colors";
+                li.dataset.id = file.id;
+
+                li.innerHTML = `
+                    <div class="drag-handle cursor-grab text-gray-400 hover:text-blue-500 p-1">
+                        <i class="ph ph-dots-six-vertical text-xl"></i>
+                    </div>
+                    
+                    <div class="w-8 h-8 rounded bg-gray-100 flex items-center justify-center text-sm font-semibold text-gray-600 chapter-number">
+                        ${index + 1}
+                    </div>
+                    
+                    <div class="flex-grow min-w-0">
+                        <div class="font-medium text-gray-800 truncate">${escapeHTML(file.title)}</div>
+                        <div class="text-xs text-gray-500 truncate mt-0.5 flex items-center gap-1">
+                            <i class="ph ph-file-md"></i> ${escapeHTML(file.filename)}
+                        </div>
+                    </div>
+                    
+                    <div class="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button class="edit-btn p-2 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors" title="Sửa tên chương">
+                            <i class="ph ph-pencil-simple text-lg"></i>
+                        </button>
+                        <button class="delete-btn p-2 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors" title="Xóa file">
+                            <i class="ph ph-trash text-lg"></i>
+                        </button>
+                    </div>
+                `;
+
+                // Gắn event listeners cho nút sửa và xóa
+                li.querySelector('.delete-btn').addEventListener('click', () => deleteFile(file.id));
+                li.querySelector('.edit-btn').addEventListener('click', () => openEditModal(file.id));
+
+                els.fileList.appendChild(li);
+            });
+        };
+
+        // Cập nhật số thứ tự khi kéo thả (không render lại toàn bộ)
+        const updateNumbering = () => {
+            const numbers = els.fileList.querySelectorAll('.chapter-number');
+            numbers.forEach((el, index) => {
+                el.textContent = index + 1;
+            });
+        };
+
+        // Cập nhật các trạng thái của giao diện (hiện rỗng, disable nút,...)
+        const updateUIState = () => {
+            const count = state.files.length;
+            els.fileCount.textContent = `${count} file${count !== 1 ? 's' : ''}`;
+            
+            if (count === 0) {
+                els.emptyState.classList.remove('hidden');
+                els.generateBtn.disabled = true;
+                els.fileList.classList.add('hidden'); // Ẩn list để hiện empty state đẹp hơn
+            } else {
+                els.emptyState.classList.add('hidden');
+                els.generateBtn.disabled = false;
+                els.fileList.classList.remove('hidden');
+            }
+        };
+
+        // Modal Event Listeners
+        els.closeModalBtn.addEventListener('click', closeEditModal);
+        els.cancelEditBtn.addEventListener('click', closeEditModal);
+        els.saveEditBtn.addEventListener('click', saveEdit);
+        els.editChapterName.addEventListener('keyup', (e) => {
+            if (e.key === 'Enter') saveEdit();
+        });
+
+        // Helper chống XSS khi render chuỗi
+        function escapeHTML(str) {
+            const p = document.createElement("p");
+            p.appendChild(document.createTextNode(str));
+            return p.innerHTML;
+        }
+
+        // --- EPUB GENERATION ---
+
+        // Helper tạo UUID đơn giản
+        function generateUUID() {
+            let d = new Date().getTime();
+            if (typeof performance !== 'undefined' && typeof performance.now === 'function'){
+                d += performance.now();
+            }
+            return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+                const r = (d + Math.random() * 16) % 16 | 0;
+                d = Math.floor(d / 16);
+                return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+            });
+        }
+
+        // Fetch nội dung CSS của KaTeX để nhúng vào EPUB
+        async function getKatexCss() {
+            try {
+                const response = await fetch('https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css');
+                if (response.ok) {
+                    return await response.text();
+                }
+            } catch (e) {
+                console.warn("Không tải được KaTeX CSS từ CDN, dùng fallback CSS", e);
+            }
+            return ""; // Trả về rỗng nếu lỗi, tuy nhiên KaTeX sẽ bị mất style gốc
+        }
+
+        // Định dạng tên file an toàn cho nội bộ epub
+        function safeName(str, index) {
+            return `chapter_${index}.xhtml`;
+        }
+
+        // Hàm hỗ trợ fetch ảnh vượt qua rào cản CORS của trình duyệt
+        async function fetchImageAsBlob(url) {
+            try {
+                // Thử tải trực tiếp trước
+                const res = await fetch(url);
+                if (!res.ok) throw new Error('Lỗi fetch trực tiếp');
+                return await res.blob();
+            } catch (e) {
+                console.warn("Lỗi CORS khi tải ảnh, đang thử dùng proxy...", e);
+                // Sử dụng CORS proxy để tải ảnh từ các host như ibb.co, imgur...
+                const proxyUrl = 'https://api.allorigins.win/raw?url=' + encodeURIComponent(url);
+                const resProxy = await fetch(proxyUrl);
+                if (!resProxy.ok) throw new Error('Không thể tải ảnh qua proxy');
+                return await resProxy.blob();
+            }
+        }
+
+        // Hàm chính tạo EPUB
+        async function generateEpub() {
+            if (state.files.length === 0) return;
+
+            const bookTitle = els.bookTitle.value.trim() || 'My eBook';
+            const bookAuthor = els.bookAuthor.value.trim() || 'Unknown Author';
+            const bookCoverUrl = els.bookCover.value.trim();
+            const uuid = generateUUID();
+            const date = new Date().toISOString().split('T')[0];
+
+            // Setup UI loading
+            const btnContent = els.generateBtn.innerHTML;
+            els.generateBtn.disabled = true;
+            els.generateBtn.innerHTML = '<div class="loader mr-2"></div> <span>Đang xử lý...</span>';
+            els.statusMessage.classList.remove('hidden', 'text-red-600', 'text-green-600');
+            els.statusMessage.classList.add('text-blue-600');
+            els.statusMessage.textContent = 'Khởi tạo cấu trúc EPUB...';
+
+            try {
+                // Sử dụng JSZip để tạo cấu trúc file
+                const zip = new JSZip();
+
+                // 1. mimetype (bắt buộc phải là file đầu tiên, không nén)
+                zip.file("mimetype", "application/epub+zip");
+
+                // 2. META-INF/container.xml
+                const metaInf = zip.folder("META-INF");
+                metaInf.file("container.xml", `<?xml version="1.0"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+   <rootfiles>
+      <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
+   </rootfiles>
+</container>`);
+
+                // 3. Thư mục nội dung OEBPS
+                const oebps = zip.folder("OEBPS");
+
+                // --- Chuẩn bị Stylesheet ---
+                els.statusMessage.textContent = 'Đang chuẩn bị định dạng hiển thị...';
+                const katexCss = await getKatexCss();
+                
+                const cssContent = `
+                    /* --- Base Styles --- */
+                    body { font-family: sans-serif; line-height: 1.6; margin: 5%; text-align: justify; }
+                    h1, h2, h3 { color: #333; line-height: 1.2; }
+                    h1 { border-bottom: 1px solid #ccc; padding-bottom: 10px; margin-top: 2em; }
+                    p { margin-bottom: 1em; }
+                    img { max-width: 100%; height: auto; display: block; margin: 1em auto; }
+                    blockquote { border-left: 4px solid #ccc; margin-left: 0; padding-left: 1em; font-style: italic; color: #555; }
+                    code { font-family: monospace; background-color: #f4f4f4; padding: 2px 4px; border-radius: 3px; font-size: 0.9em;}
+                    pre { background-color: #f4f4f4; padding: 1em; overflow-x: auto; border-radius: 4px; }
+                    pre code { background-color: transparent; padding: 0; }
+                    table { border-collapse: collapse; width: 100%; margin-bottom: 1em; }
+                    th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+                    th { background-color: #f2f2f2; }
+                    
+                    /* --- Math/KaTeX Support cho EPUB (chỉnh sửa lại một chút cho an toàn e-reader) --- */
+                    .katex-display { text-align: center; margin: 1em 0; overflow-x: auto; overflow-y: hidden; }
+                    .katex { font-size: 1.1em; }
+                    
+                    /* --- Style cho trang Mục lục (TOC) --- */
+                    .toc-title { text-align: center; border-bottom: 1px solid #ccc; padding-bottom: 10px; margin-top: 1.5em; text-transform: uppercase; }
+                    .toc-list { list-style-type: none; padding-left: 0; margin-top: 1.5em; }
+                    .toc-list li { margin-bottom: 12px; font-size: 1.1em; border-bottom: 1px dashed #eee; padding-bottom: 8px; }
+                    .toc-list a { text-decoration: none; color: #0056b3; font-weight: bold; }
+                    
+                    ${katexCss}
+                `;
+                oebps.file("styles.css", cssContent);
+
+                // --- Cấu hình Marked Parser với KaTeX ---
+                // Xóa config cũ nếu đã có và đăng ký extension KaTeX
+                marked.use(window.markedKatex({
+                    throwOnError: false, // Tránh crash app nếu gõ sai syntax toán
+                    displayMode: false,
+                    output: 'html'       // Chỉ xuất HTML (chặn xuất MathML vì vài máy đọc sách không support tốt)
+                }));
+                
+                marked.setOptions({
+                    breaks: true,
+                    gfm: true
+                });
+
+                // Các biến lưu trữ cấu trúc để tạo manifest và spine
+                let manifestItems = '';
+                let spineItems = '';
+                let navPoints = ''; // Cho toc.ncx
+                let tocHtmlItems = ''; // Cho toc.xhtml
+
+                // --- Sinh nội dung cho từng chương ---
+                for (let i = 0; i < state.files.length; i++) {
+                    const file = state.files[i];
+                    els.statusMessage.textContent = `Đang chuyển đổi: ${file.title}...`;
+                    
+                    // Parse MD to HTML
+                    const htmlContent = marked.parse(file.content);
+                    
+                    // Bọc vào cấu trúc xhtml chuẩn epub
+                    const xhtmlStr = `<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="vi">
+<head>
+    <title>${escapeHTML(file.title)}</title>
+    <link rel="stylesheet" href="styles.css" type="text/css"/>
+</head>
+<body>
+    <div class="chapter" id="chapter_${i}">
+        ${htmlContent}
+    </div>
+</body>
+</html>`;
+
+                    const fileName = safeName(file.filename, i);
+                    const id = `item_${i}`;
+
+                    // Lưu file vào zip
+                    oebps.file(fileName, xhtmlStr);
+
+                    // Thêm vào manifest, spine, toc
+                    manifestItems += `\n    <item id="${id}" href="${fileName}" media-type="application/xhtml+xml"/>`;
+                    spineItems += `\n    <itemref idref="${id}"/>`;
+                    
+                    navPoints += `
+    <navPoint id="navPoint-${i+1}" playOrder="${i+1}">
+      <navLabel><text>${escapeHTML(file.title)}</text></navLabel>
+      <content src="${fileName}"/>
+    </navPoint>`;
+
+                    tocHtmlItems += `\n      <li><a href="${fileName}">${escapeHTML(file.title)}</a></li>`;
+                }
+
+                els.statusMessage.textContent = `Đang tạo Mục lục (TOC)...`;
+
+                // --- Tạo toc.ncx (Dùng cho máy đọc sách cũ) ---
+                const ncxContent = `<?xml version="1.0" encoding="UTF-8"?>
+<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">
+  <head>
+    <meta name="dtb:uid" content="urn:uuid:${uuid}"/>
+    <meta name="dtb:depth" content="1"/>
+    <meta name="dtb:totalPageCount" content="0"/>
+    <meta name="dtb:maxPageNumber" content="0"/>
+  </head>
+  <docTitle><text>${escapeHTML(bookTitle)}</text></docTitle>
+  <navMap>
+    ${navPoints}
+  </navMap>
+</ncx>`;
+                oebps.file("toc.ncx", ncxContent);
+
+                // --- Tạo toc.xhtml (EPUB 3 chuẩn) ---
+                const tocXhtml = `<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
+<head>
+    <title>Mục lục</title>
+    <link rel="stylesheet" href="styles.css" type="text/css"/>
+</head>
+<body>
+    <nav epub:type="toc" id="toc">
+        <h1 class="toc-title">Mục lục</h1>
+        <ol class="toc-list">
+            ${tocHtmlItems}
+        </ol>
+    </nav>
+</body>
+</html>`;
+                oebps.file("toc.xhtml", tocXhtml);
+
+                // Đưa Mục lục vào luồng đọc (Spine) ở ngay đầu sách (trước các chương)
+                spineItems = `\n    <itemref idref="toc" linear="yes"/>` + spineItems;
+
+                // --- Xử lý Bìa (nếu có) ---
+                let coverManifest = '';
+                let coverMeta = '';
+                if (bookCoverUrl) {
+                    els.statusMessage.textContent = 'Đang tải và nhúng ảnh bìa...';
+                    try {
+                        // Tải ảnh về dạng Blob
+                        const coverBlob = await fetchImageAsBlob(bookCoverUrl);
+                        const mimeType = coverBlob.type || 'image/jpeg';
+                        const ext = mimeType === 'image/png' ? 'png' : (mimeType === 'image/gif' ? 'gif' : 'jpg');
+                        const coverFileName = `cover.${ext}`;
+
+                        // Lưu file ảnh vào thư mục images/ trong zip
+                        oebps.file(`images/${coverFileName}`, coverBlob);
+
+                        // Tạo file xhtml chứa ảnh bìa
+                        const coverXhtml = `<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
+<head>
+    <title>Cover</title>
+    <style type="text/css">
+        body { margin: 0; padding: 0; text-align: center; background-color: #ffffff; }
+        div.cover { text-align: center; page-break-inside: avoid; }
+        img.cover-image { max-width: 100%; height: auto; object-fit: contain; max-height: 100vh; }
+    </style>
+</head>
+<body>
+    <div class="cover">
+        <img src="images/${coverFileName}" alt="Cover" class="cover-image" />
+    </div>
+</body>
+</html>`;
+                        oebps.file("cover.xhtml", coverXhtml);
+                        
+                        // Khai báo ảnh bìa trong manifest chuẩn EPUB3 (thuộc tính properties="cover-image" rất quan trọng)
+                        coverManifest = `
+    <item id="cover-image" href="images/${coverFileName}" media-type="${mimeType}" properties="cover-image"/>
+    <item id="cover" href="cover.xhtml" media-type="application/xhtml+xml"/>`;
+                        
+                        coverMeta = `\n    <meta name="cover" content="cover-image"/>`;
+                        spineItems = `\n    <itemref idref="cover" linear="yes"/>` + spineItems;
+                    } catch (error) {
+                        console.error("Không thể tải ảnh bìa:", error);
+                        els.statusMessage.textContent = 'Không thể tải ảnh bìa. Đang tiếp tục tạo sách...';
+                    }
+                }
+
+                els.statusMessage.textContent = `Đóng gói file EPUB...`;
+
+                // --- Tạo content.opf (Định nghĩa metadata, manifest, spine) ---
+                const opfContent = `<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" unique-identifier="BookId" version="3.0">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>${escapeHTML(bookTitle)}</dc:title>
+    <dc:creator>${escapeHTML(bookAuthor)}</dc:creator>
+    <dc:identifier id="BookId">urn:uuid:${uuid}</dc:identifier>
+    <dc:language>vi</dc:language>
+    <dc:date>${date}</dc:date>
+    <meta property="dcterms:modified">${new Date().toISOString()}</meta>
+    ${coverMeta}
+  </metadata>
+  <manifest>
+    <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>
+    <item id="toc" href="toc.xhtml" media-type="application/xhtml+xml" properties="nav"/>
+    <item id="css" href="styles.css" media-type="text/css"/>
+    ${coverManifest}
+    ${manifestItems}
+  </manifest>
+  <spine toc="ncx">
+    ${spineItems}
+  </spine>
+</package>`;
+                oebps.file("content.opf", opfContent);
+
+                // --- Tạo ZIP và Tải xuống ---
+                const content = await zip.generateAsync({
+                    type: "blob",
+                    mimeType: "application/epub+zip",
+                    compression: "DEFLATE",
+                    compressionOptions: {
+                        level: 5
+                    }
+                });
+
+                // Trigger download
+                const url = window.URL.createObjectURL(content);
+                const a = document.createElement("a");
+                a.style.display = "none";
+                a.href = url;
+                a.download = `${bookTitle.replace(/[^a-z0-9]/gi, '_').toLowerCase() || 'book'}.epub`;
+                document.body.appendChild(a);
+                a.click();
+                
+                // Dọn dẹp
+                window.URL.revokeObjectURL(url);
+                document.body.removeChild(a);
+
+                // Thành công
+                els.statusMessage.textContent = 'Hoàn tất! Đã tải xuống file EPUB.';
+                els.statusMessage.classList.remove('text-blue-600');
+                els.statusMessage.classList.add('text-green-600');
+
+            } catch (error) {
+                console.error("Lỗi tạo epub:", error);
+                els.statusMessage.textContent = 'Có lỗi xảy ra: ' + error.message;
+                els.statusMessage.classList.remove('text-blue-600');
+                els.statusMessage.classList.add('text-red-600');
+            } finally {
+                // Khôi phục nút bấm
+                setTimeout(() => {
+                    els.generateBtn.disabled = false;
+                    els.generateBtn.innerHTML = btnContent;
+                    setTimeout(() => {
+                        els.statusMessage.classList.add('hidden');
+                    }, 4000);
+                }, 1000);
+            }
+        }
+
+        // Gắn sự kiện tạo sách
+        els.generateBtn.addEventListener('click', generateEpub);
+
+        // Khởi tạo trạng thái ban đầu
+        updateUIState();
+
+    </script>
+</body>
+</html>
