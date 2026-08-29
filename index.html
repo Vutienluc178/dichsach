@@ -607,21 +607,28 @@
                     /* --- Style cho trang Mục lục (TOC) --- */
                     .toc-title { text-align: center; border-bottom: 1px solid #ccc; padding-bottom: 10px; margin-top: 1.5em; text-transform: uppercase; }
                     .toc-list { list-style-type: none; padding-left: 0; margin-top: 1.5em; }
-                    .toc-list li { margin-bottom: 12px; font-size: 1.1em; border-bottom: 1px dashed #eee; padding-bottom: 8px; }
-                    .toc-list a { text-decoration: none; color: #0056b3; font-weight: bold; }
+                    .toc-list li { margin-bottom: 8px; font-size: 1.1em; }
+                    .toc-list a { text-decoration: none; color: #0056b3; font-weight: normal; }
+                    .toc-level-1 { font-weight: bold; border-bottom: 1px solid #eee; padding-bottom: 8px; margin-top: 16px; margin-left: 0; }
+                    .toc-level-1 a { font-weight: bold; }
+                    .toc-level-2 { margin-left: 20px; font-size: 0.95em; }
+                    .toc-level-3 { margin-left: 40px; font-size: 0.9em; font-style: italic; color: #555; }
                     
                     ${katexCss}
                 `;
-                oebps.file("styles.css", cssContent);
 
                 // --- Cấu hình Marked Parser với KaTeX ---
-                // Xóa config cũ nếu đã có và đăng ký extension KaTeX
                 marked.use(window.markedKatex({
                     throwOnError: false, // Tránh crash app nếu gõ sai syntax toán
                     displayMode: false,
-                    output: 'html'       // Chỉ xuất HTML (chặn xuất MathML vì vài máy đọc sách không support tốt)
+                    output: 'html'       // Chỉ xuất HTML
                 }));
                 
+                // Nếu marked-xhtml load thành công thì vẫn dùng, làm lớp phòng thủ số 1
+                if (typeof window.markedXhtml === 'function') {
+                    marked.use(window.markedXhtml());
+                }
+
                 marked.setOptions({
                     breaks: true,
                     gfm: true
@@ -633,14 +640,77 @@
                 let navPoints = ''; // Cho toc.ncx
                 let tocHtmlItems = ''; // Cho toc.xhtml
 
+                let globalNavPointIndex = 0; // Đếm tổng số navPoint cho NCX
+
                 // --- Sinh nội dung cho từng chương ---
                 for (let i = 0; i < state.files.length; i++) {
                     const file = state.files[i];
                     els.statusMessage.textContent = `Đang chuyển đổi: ${file.title}...`;
                     
                     // Parse MD to HTML
-                    const htmlContent = marked.parse(file.content);
-                    
+                    let htmlContent = marked.parse(file.content);
+                    const fileName = safeName(file.filename, i);
+                    const id = `item_${i}`;
+
+                    // --- TẠO MỤC LỤC CHI TIẾT (DEEP TOC) TỪ THẺ HEADING H1, H2, H3 ---
+                    let chapterTocHtml = '';
+                    let chapterNavPoints = '';
+                    let headingCounter = 0;
+
+                    htmlContent = htmlContent.replace(/<h([1-3])([^>]*)>(.*?)<\/h\1>/gi, (match, level, attrs, text) => {
+                        headingCounter++;
+                        const headingId = `hdg_${i}_${headingCounter}`;
+                        
+                        // Lọc bỏ mã MathML của KaTeX để không bị lặp chữ, sau đó xoá tất cả tag HTML (<strong>, <em>, ...)
+                        let cleanText = text.replace(/<span class="katex-mathml">.*?<\/span>/gi, '');
+                        cleanText = cleanText.replace(/<[^>]+>/g, '').trim() || `Tiêu đề ${headingCounter}`;
+                        
+                        // CSS phân cấp cho trang Mục lục
+                        const levelClass = `toc-level-${level}`;
+
+                        chapterTocHtml += `\n      <li class="${levelClass}"><a href="${fileName}#${headingId}">${escapeHTML(cleanText)}</a></li>`;
+                        
+                        // NCX (Mục lục ở sidebar thanh điều hướng của máy đọc sách)
+                        globalNavPointIndex++;
+                        chapterNavPoints += `
+    <navPoint id="navPoint-${globalNavPointIndex}" playOrder="${globalNavPointIndex}">
+      <navLabel><text>${escapeHTML(cleanText)}</text></navLabel>
+      <content src="${fileName}#${headingId}"/>
+    </navPoint>`;
+                        
+                        // Chèn ID vào thẻ Heading để Mục lục có thể click (link) tới chính xác vị trí dòng này
+                        // Loại bỏ thuộc tính id cũ (nếu có do markdown tự sinh ra) để tránh trùng lặp 2 thuộc tính ID
+                        let cleanAttrs = attrs.replace(/id="[^"]*"/i, '');
+                        return `<h${level}${cleanAttrs} id="${headingId}">${text}</h${level}>`;
+                    });
+
+                    // Nếu nội dung chương KHÔNG có bất kỳ thẻ tiêu đề nào, dùng Tên File làm 1 mục TOC mặc định
+                    if (headingCounter === 0) {
+                        globalNavPointIndex++;
+                        chapterTocHtml = `\n      <li class="toc-level-1"><a href="${fileName}">${escapeHTML(file.title)}</a></li>`;
+                        chapterNavPoints = `
+    <navPoint id="navPoint-${globalNavPointIndex}" playOrder="${globalNavPointIndex}">
+      <navLabel><text>${escapeHTML(file.title)}</text></navLabel>
+      <content src="${fileName}"/>
+    </navPoint>`;
+                    }
+
+                    // Nối kết quả của chương này vào Mục lục chung của cả quyển sách
+                    tocHtmlItems += chapterTocHtml;
+                    navPoints += chapterNavPoints;
+
+                    // --- BƯỚC CHUẨN HOÁ XHTML (KHẮC PHỤC LỖI MISMATCH) ---
+                    // Quét và ép tất cả các thẻ rỗng (void elements) phổ biến của Markdown 
+                    // phải ở định dạng đóng an toàn cho máy đọc sách.
+                    htmlContent = htmlContent.replace(/<(hr|br|img|input)\b([^>]*?)(?:\/?>)/gi, (match, tag, attrs) => {
+                        let cleanAttrs = attrs.trim();
+                        // Nếu lỡ có dấu / ở cuối attrs do plugin sinh ra thì cắt bỏ để tránh bị lặp thành <hr //>
+                        if (cleanAttrs.endsWith('/')) {
+                            cleanAttrs = cleanAttrs.slice(0, -1).trim();
+                        }
+                        return `<${tag}${cleanAttrs ? ' ' + cleanAttrs : ''}/>`;
+                    });
+
                     // Bọc vào cấu trúc xhtml chuẩn epub
                     const xhtmlStr = `<?xml version="1.0" encoding="utf-8"?>
 <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
@@ -656,8 +726,7 @@
 </body>
 </html>`;
 
-                    const fileName = safeName(file.filename, i);
-                    const id = `item_${i}`;
+                    // Đã xóa bỏ khai báo lại biến fileName và id ở đây để tránh lỗi SyntaxError
 
                     // Lưu file vào zip
                     oebps.file(fileName, xhtmlStr);
